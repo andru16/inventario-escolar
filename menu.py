@@ -1,8 +1,13 @@
 from operaciones import Operaciones
+from estadisticas  import Estadisticas
+from datetime import datetime
+import locale
 
 class Menu:
-    def __init__(self, operaciones):
+    def __init__(self, operaciones, estadisticas):
         self.operaciones = operaciones
+        self.estadisticas = estadisticas
+        locale.setlocale(locale.LC_ALL, 'es_ES.UTF-8')
 
     def mostrar_menu_principal(self):
         print("\nMenú principal:")
@@ -148,7 +153,7 @@ class Menu:
             opcion = input("Seleccione una opción: ")
             
             if opcion == "1":
-                self.comprar_producto()
+                self.comprar_productos()
             elif opcion == "2":
                 self.listar_compras()
             elif opcion == "3":
@@ -235,7 +240,9 @@ class Menu:
             print("-" * 105)
         
             for producto in productos:
-                print(f"{producto[0]:^5} | {producto[1]:^30} | {producto[5]:^20} | {producto[2]:^10} | {producto[3]:^10} | {producto[4]:^10}")
+                costo = '$'+locale.format_string('%d', producto[3], grouping=True)
+                venta = '$'+locale.format_string('%d', producto[4], grouping=True)
+                print(f"{producto[0]:^5} | {producto[1]:^30} | {producto[5]:^20} | {producto[2]:^10} | {costo:^10} | {venta:^10}")
     
     def vender_producto(self):
         productos = []
@@ -253,10 +260,14 @@ class Menu:
                 cantidad = int(input("Ingrese la cantidad a vender: "))
                 
                 try:
-                    self.operaciones.vender_producto(id_producto, cantidad)
-                    productos.append((id_producto, cantidad))
-                    total_ventas += cantidad * self.operaciones.obtener_precio_unitario(id_producto)
-                    print(f"Producto añadido a la venta. Total: ${total_ventas:.2f}")
+                    precio_unitario = self.operaciones.obtener_precio_unitario(id_producto)
+                    monto_venta = cantidad * precio_unitario
+                    
+                    productos.append({"id": id_producto, "cantidad": cantidad, "precio_unitario": precio_unitario})
+                    total_ventas += monto_venta
+
+                    precio_format = locale.format_string('%d', total_ventas, grouping=True)
+                    print(f"Producto añadido a la venta. Total: ${precio_format}")
                 except ValueError as e:
                     print(f"Error al agregar producto: {str(e)}")
             elif opcion == "2":
@@ -265,12 +276,156 @@ class Menu:
             else:
                 print("Opción inválida. Por favor, intente nuevamente.")
 
-    def comprar_producto(self):
-        id_producto = input("Ingrese el ID del producto a comprar: ")
-        cantidad_a_comprar = int(input("Ingrese la cantidad a comprar: "))
+    def confirmar_venta(self, productos, total_ventas):
+        if not productos:
+            print("No se han agregado productos a la venta.")
+            return
+
+        print("\nResumen de la venta:")
+        for produto in productos:
+            query_producto = self.operaciones.producto_existe(produto['id'])
+            print(f"- {produto['cantidad']} unidades de {query_producto[1]}")
+        
+        confirmacion = input("¿Desea confirmar la venta? (s/n): ").lower()
+        if confirmacion == 's':
+            self.registrar_venta(productos, total_ventas)
+        else:
+            print("Venta cancelada.")
+
+    def registrar_venta(self, productos, total_ventas):
         
         try:
-            self.operaciones.comprar_producto(id_producto, cantidad_a_comprar)
-            print("Compra realizada con éxito.")
-        except ValueError as e:
-            print(f"Error al realizar la compra: {str(e)}")
+            for producto in productos:
+                if not self.operaciones.vender_producto(producto['id'], producto['cantidad']):
+                    raise ValueError(f"No se pudo vender el producto {producto['id']}")
+            
+            print("Venta registrada con éxito.")
+        except Exception as e:
+            print(f"Error al registrar la venta: {str(e)}")
+    
+    def listar_ventas(self):
+        ventas = self.operaciones.listar_ventas()
+
+        if not ventas:
+            print("No hay ventas en el sistema.")
+        else:
+            print(f"{'ID':^5} | {'Producto':^30} | {'Fecha':^20} | {'Cantidad':^10} | {'Precio':^10} | {'Total':^10}")
+            print("-" * 105)
+        
+            for venta in ventas:
+                precio_unitario = '$'+locale.format_string('%d', venta[4], grouping=True)
+                total = '$'+locale.format_string('%d', venta[5], grouping=True)
+                print(f"{venta[0]:^5} | {venta[1]:^30} | {venta[2]:^20} | {venta[3]:^10} | {precio_unitario:^10} | {total:^10}")
+                
+
+    def comprar_productos(self):
+        productos = []
+        total_compra = 0
+        
+        while True:
+            print("\n------------------- Compras -------------------")
+            print("1. Agregar producto a la compra")
+            print("2. Finalizar compra")
+            
+            opcion = input("Ingrese su opción: ")
+            
+            if opcion == "1":
+                id_producto = input("Ingrese el ID del producto: ")
+                cantidad_a_comprar = int(input("Ingrese la cantidad a comprar: "))
+                
+                try:
+                    costo_unitario = float(input("Ingrese el costo unitario del producto: $"))
+                    precio_venta = float(input("Ingrese el nuevo precio de venta para el producto: $"))
+                    
+                    monto_compra = cantidad_a_comprar * costo_unitario
+                    
+                    productos.append({
+                        "id": id_producto,
+                        "cantidad": cantidad_a_comprar,
+                        "costo_unitario": costo_unitario,
+                        "precio_venta": precio_venta
+                    })
+                    total_compra += monto_compra
+
+                    precio_format = locale.format_string('%d', total_compra, grouping=True)
+                    print(f"Producto añadido a la compra. Total: ${precio_format}")
+                except ValueError as e:
+                    print(f"Error al agregar producto: {str(e)}")
+            elif opcion == "2":
+                self.confirmar_compra(productos, total_compra)
+                break
+            else:
+                print("Opción inválida. Por favor, intente nuevamente.")
+
+    def confirmar_compra(self, productos, total_compra):
+        if not productos:
+            print("No se han agregado productos a la compra.")
+            return
+
+        print("\nResumen de la compra:")
+        for producto in productos:
+            query_producto = self.operaciones.producto_existe(producto['id'])
+            print(f"- {producto['cantidad']} unidades de {query_producto[1]}")
+        
+        confirmacion = input("¿Desea confirmar la compra? (s/n): ").lower()
+        if confirmacion == 's':
+            self.registrar_compra(productos, total_compra)
+        else:
+            print("Compra cancelada.")
+
+    def registrar_compra(self, productos, total_compra):
+        
+        try:
+            for producto in productos:
+                if not self.operaciones.registrar_compra_y_actualizar_producto(
+                    producto['id'], 
+                    producto['cantidad'], 
+                    producto['costo_unitario'], 
+                    producto['precio_venta']
+                ):
+                    raise ValueError(f"No se pudo registrar la compra del producto {producto['id']}")
+            
+            print("Compra registrada con éxito.")
+        except Exception as e:
+            print(f"Error al registrar la compra: {str(e)}")
+
+        
+    def listar_compras(self):
+        ventas = self.operaciones.listar_compras()
+
+        if not ventas:
+            print("No hay compras en el sistema.")
+        else:
+            print(f"{'ID':^5} | {'Producto':^30} | {'Fecha':^20} | {'Cantidad':^10} | {'Precio':^10} | {'Total':^10}")
+            print("-" * 105)
+        
+            for venta in ventas:
+                precio_unitario = '$'+locale.format_string('%d', venta[4], grouping=True)
+                total = '$'+locale.format_string('%d', venta[5], grouping=True)
+                print(f"{venta[0]:^5} | {venta[1]:^30} | {venta[2]:^20} | {venta[3]:^10} | {precio_unitario:^10} | {total:^10}")
+                
+    def ver_estadisticas(self):
+        total_venta = self.estadisticas.total_ventas()
+        total_compra = self.estadisticas.total_compras()
+
+        print(f"\nTotal Ventas: ${locale.format_string('%d', total_venta, grouping=True)}")
+        print(f"Total Compras: ${locale.format_string('%d', total_compra, grouping=True)}")
+
+        productos_top = self.estadisticas.productos_mas_vendidos()
+        print("\nProductos más vendidos:")
+        for i, (nombre, veces_vendido) in enumerate(productos_top):
+            print(f"{i+1}. {nombre}: {veces_vendido} veces vendido")
+
+        ventas_mensual = self.estadisticas.ventas_por_mes()
+        compras_mensual = self.estadisticas.compras_por_mes()
+
+        print("\nVentas por mes:")
+        for mes, monto in ventas_mensual:
+            print(f"{mes}: ${locale.format_string('%d', monto, grouping=True)}")
+        
+        print("\nCompras por mes:")
+        for mes, monto in compras_mensual:
+            print(f"{mes}: ${locale.format_string('%d', monto, grouping=True)}")
+
+        self.estadisticas.generar_grafico_barras_ventas_compras(ventas_mensual, compras_mensual)
+        self.estadisticas.generar_grafico_pie_productos_mas_vendidos(productos_top)

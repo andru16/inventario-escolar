@@ -56,14 +56,14 @@ class Operaciones:
 
 
     def producto_existe(self, id_producto):
-        query = "SELECT id FROM productos WHERE id = ?"
+        query = "SELECT id, nombre FROM productos WHERE id = ?"
         self.db.cursor.execute(query, (id_producto,))
         return self.db.cursor.fetchone()
     
     def obtener_precio_unitario(self, id_producto):
         query = "SELECT precio_venta FROM productos WHERE id = ?"
-        self.db.cursor.execute(query, (id_producto,))
-        return self.db.cursor.fetchone()
+        result = self.db.cursor.execute(query, (id_producto,)).fetchone()
+        return result[0] if result else None
 
     def agregar_producto(self, nombre, categoria, cantidad, precio_compra, precio_venta):
         
@@ -133,47 +133,84 @@ class Operaciones:
         return self.db.cursor.fetchall()
 
     def vender_producto(self, id_producto, cantidad_a_vender):
-        query_stock = "SELECT cantidad FROM productos WHERE id = ?"
-        self.db.cursor.execute(query_stock, (id_producto,))
-        stock_actual = self.db.cursor.fetchone()[0]
+        try:
+            query_stock = "SELECT cantidad FROM productos WHERE id = ?"
+            self.db.cursor.execute(query_stock, (id_producto,))
+            stock_actual = self.db.cursor.fetchone()[0]
+            
+            if stock_actual < cantidad_a_vender:
+                raise ValueError("No hay suficiente stock para realizar la venta")
+            
+            nueva_cantidad = stock_actual - cantidad_a_vender
+            query_update_stock = "UPDATE productos SET cantidad = ? WHERE id = ?"
+            self.db.cursor.execute(query_update_stock, (nueva_cantidad, id_producto))
+            
+            fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            query_registro_venta = """
+                INSERT INTO ventas (
+                    producto_id,
+                    fecha,
+                    cantidad,
+                    precio_unitario
+                ) VALUES (?, ?, ?, ?)
+            """
+            precio_unitario = self.db.cursor.execute("SELECT precio_venta FROM productos WHERE id = ?", (id_producto,)).fetchone()[0]
+            self.db.cursor.execute(query_registro_venta, (id_producto, fecha_venta, cantidad_a_vender, precio_unitario))
+            
+            self.db.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error al vender el producto: {str(e)}")
+            return False
         
-        if stock_actual < cantidad_a_vender:
-            raise ValueError("No hay suficiente stock para realizar la venta")
-        
-        nueva_cantidad = stock_actual - cantidad_a_vender
-        query_update_stock = "UPDATE productos SET cantidad = ? WHERE id = ?"
-        self.db.cursor.execute(query_update_stock, (nueva_cantidad, id_producto))
-        
-        fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        query_registro_venta = """
-            INSERT INTO ventas (
-                producto_id,
-                fecha,
-                cantidad,
-                precio_unitario
-            ) VALUES (?, ?, ?, ?)
+    def listar_ventas(self):
+        query = """
+            SELECT v.id, p.nombre, v.fecha, v.cantidad, v.precio_unitario, 
+                (v.cantidad * v.precio_unitario) AS total_venta,
+                (SELECT SUM(cantidad * precio_unitario) FROM ventas) AS total_general
+            FROM ventas v
+            JOIN productos p ON v.producto_id = p.id
         """
-        self.db.cursor.execute(query_registro_venta, (id_producto, fecha_venta, cantidad_a_vender, self.db.cursor.execute("SELECT precio_venta FROM productos WHERE id = ?", (id_producto,)).fetchone()[0]))
+        self.db.cursor.execute(query)
+        return self.db.cursor.fetchall()
 
-    def comprar_producto(self, id_producto, cantidad_a_comprar):
-        query_update_stock = """
-            UPDATE productos
-            SET cantidad = cantidad + ?
-            WHERE id = ?
-        """
-        self.db.cursor.execute(query_update_stock, (cantidad_a_comprar, id_producto))
-        
-        fecha_compra = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        query_registro_compra = """
-            INSERT INTO compras (
-                producto_id,
-                fecha,
-                cantidad,
-                precio_unitario
-            ) VALUES (?, ?, ?, ?)
-        """
-        self.db.cursor.execute(query_registro_compra, (id_producto, fecha_compra, cantidad_a_comprar, self.db.cursor.execute("SELECT precio_compra FROM productos WHERE id = ?", (id_producto,)).fetchone()[0]))
 
+    def registrar_compra_y_actualizar_producto(self, id_producto, cantidad, costo_unitario, precio_venta):
+        try:
+            # Registrar la compra
+            fecha_compra = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            query_registro_compra = """
+                INSERT INTO compras (producto_id, fecha, cantidad, precio_unitario)
+                VALUES (?, ?, ?, ?)
+            """
+            self.db.cursor.execute(query_registro_compra, (id_producto, fecha_compra, cantidad, costo_unitario))
+            
+            # Actualizar el producto
+            query_actualizar_producto = """
+                UPDATE productos 
+                SET cantidad = cantidad + ?, precio_compra = ?, precio_venta = ?
+                WHERE id = ?
+            """
+            self.db.cursor.execute(query_actualizar_producto, (cantidad, costo_unitario, precio_venta, id_producto))
+            
+            self.db.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error al registrar la compra y actualizar el producto: {str(e)}")
+            self.db.conn.rollback()
+            return False
+    
+    def listar_compras(self):
+        query = """
+            SELECT v.id, p.nombre, v.fecha, v.cantidad, v.precio_unitario, 
+                (v.cantidad * v.precio_unitario) AS total_venta,
+                (SELECT SUM(cantidad * precio_unitario) FROM compras) AS total_general
+            FROM compras v
+            JOIN productos p ON v.producto_id = p.id
+        """
+        self.db.cursor.execute(query)
+        return self.db.cursor.fetchall()
+    
     def generar_estadisticas(self):
         total_productos = self.db.cursor.execute('SELECT COUNT(*) FROM productos').fetchone()[0]
         total_unidades = self.db.cursor.execute('SELECT SUM(cantidad) FROM productos').fetchone()[0] or 0

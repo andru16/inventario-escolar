@@ -1,5 +1,6 @@
 from db import Database
 from operaciones import Operaciones
+from estadisticas import Estadisticas
 from menu import Menu
 
 def main():
@@ -8,7 +9,8 @@ def main():
     
     # Crear instancias de Operaciones y Menu
     operaciones = Operaciones(db)
-    menu = Menu(operaciones)
+    estadisticas = Estadisticas(db)
+    menu = Menu(operaciones, estadisticas)
     
     # Ejecutar el menú principal
     menu.run()
